@@ -1,0 +1,26 @@
+vllm serve /workspace/models/GLM-5.2-W4A8C8-A3-0731 \
+    --seed 1024   --host 0.0.0.0   --port 8091   --served-model-name glm-52   \
+    --max-model-len 400000   --max-num-batched-tokens 8000   --gpu-memory-utilization 0.95   \
+    --api-server-count 1   --max-num-seqs 64   --data-parallel-size 1   --pipeline-parallel-size 1   \
+    --tensor-parallel-size 16   --enforce-eager   --async-scheduling   --enable-chunked-prefill  \
+    --speculative-config '{"num_speculative_tokens": 3, "method": "deepseek_mtp", "enforce_eager": true}'  \
+    --block-size 128   --compilation-config '{"cudagraph_mode": "FULL_DECODE_ONLY"}'   \
+    --profiler-config '{"profiler": "torch", "torch_profiler_dir": "/vllm-workspace/vllm-ascend/whz-profile/glm-52-opt2-mtp", "torch_profiler_with_stack": false, "torch_profiler_with_memory": true}'   \
+    --kv-cache-dtype int8   --attention_config.indexer_kv_dtype int8  \
+    --additional-config '{
+      "enable_flashcomm1": true,
+      "enable_dsa_cp": true, 
+      "ascend_compilation_config": {
+          "enable_npugraph_ex": true, 
+          "enable_static_kernel": false,
+          "fuse_muls_add": true
+      },
+      "multistream_overlap_shared_expert": true, 
+      "enable_mc2_hierarchy_comm": false, 
+      "enable_cpu_binding": true, 
+      "recompute_scheduler_enable": false, 
+      "weight_nz_mode": 1,
+      "enable_fused_mc2": 2,
+      "mega_moe_max_tokens": 32768
+    }'   \
+    --quantization ascend   --enable-expert-parallel   --safetensors-load-strategy prefetch
