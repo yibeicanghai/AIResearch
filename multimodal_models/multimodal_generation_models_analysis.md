@@ -3084,3 +3084,70 @@ PixelUMM 的 F5 实验表明 8B 模型收敛速度是 1.7B 的 3 倍，暗示像
 - **成熟度判断**：仍在研究探索阶段，需在模型规模、性能、效率、稳定性和高分辨率策略等方面取得突破后才能挑战潜空间路线的主流地位
 
 > **出处**：arXiv:2609.38597 (PixelUMM)；arXiv:2607.17585 (pDiT 综述)；arXiv:2608.16793 (PixRestore)；arXiv:2607.05373 (PixWorld)；arXiv:2608.21885 (Observation Operators)；各商业产品官方文档
+
+### 14.6 像素空间无编码器路线的技术溯源
+
+**PixelUMM 并非像素空间无编码器路线的首创者。** PixelUMM 论文自身在 Section 1 和 Related Work 中明确引用了更早的先驱工作。
+
+#### 14.6.1 PixelUMM 论文的原始引用
+
+PixelUMM 论文 Section 1 直接陈述：
+
+> "Recent progress in pixel-space generation offers a route around the separate VAE interface. **JiT [66] and PixelDiT [168]** show that image generation can operate directly on pixels without a pretrained latent autoencoder."
+
+> "**TUNA-2 [77], SenseNova-U1 [32], and SenseNova-U1.5 [30]** develop this direction for unified image understanding and generation with encoder-free, pixel-space interfaces."
+
+Related Work 进一步指出：
+
+> "Pixel-space diffusion and flow models remove the need for latent image compression [50, 13, 135, 19, 168, 66]."
+
+> "TUNA-2 and the NEO-unify/SenseNova series extend pixel-space learning to unified understanding and generation [77, 105, 32, 30]."
+
+#### 14.6.2 技术溯源表
+
+| 工作 | 时间 | 贡献 | 与 PixelUMM 的继承关系 |
+|------|------|------|----------------------|
+| **JiT** | 2025 | 首创 clean-pixel prediction，无 VAE 图像生成 | PixelUMM 继承其像素空间 flow matching 方法（`z_t = (1-t)·x + t·ε`） |
+| **PixelDiT** | 2025 | 像素空间 diffusion transformer，移除 VAE 瓶颈 | 与 JiT 并列为像素空间生成先驱 |
+| **MiniT2I** | 2025 | 无时间步条件化的像素空间 T2I | PixelUMM 继承其无 AdaLN 设计（Section 2.1 明确引用） |
+| **TUNA-2** | 2025 | 无编码器像素空间**统一理解+生成** | PixelUMM 技术路线的直接先驱 |
+| **SenseNova-U1 / U1.5** | 2025 (SenseTime) | 无编码器像素空间统一模型，引入 MoT 条件化设计和 T/H/W MRoPE | PixelUMM 继承其条件化设计（干净条件走理解专家，噪声目标走生成专家）和 MRoPE 拓扑 |
+| **NEO** | 2025 | 三轴 Native RoPE + 像素空间统一模型 | PixelUMM 继承其 T/H/W RoPE 分配方案（半头时间轴，四分之一各给 H/W） |
+
+#### 14.6.3 PixelUMM 的实际创新点
+
+PixelUMM **不是首创**像素空间无编码器路线，其创新在于以下四个方面：
+
+1. **将像素空间建模从图像扩展到视频**：使用 3D patchify（4×16×16 时空 tubelets），这是 JiT/PixelDiT/TUNA-2 等先前工作未涉及的。论文 Section 1 明确指出 "extending this paradigm from images to videos is non-trivial"。
+
+2. **像素空间 + MoT 架构结合**：将 BAGEL 的 MoT 架构（共享 self-attention + 分离 QKV/FFN）移植到像素空间。先前工作（TUNA-2/SenseNova）的架构细节未完全公开，PixelUMM 是首个明确将 MoT 与像素空间结合并开源代码的模型。
+
+3. **无时间步条件化扩展到视频**：将 MiniT2I 的无 AdaLN 设计从图像扩展到视频生成——"The denoising network receives the noisy pixels without a separate timestep input"。
+
+4. **系统的消融研究**：八组实验（F1-F8）提供了像素空间统一建模的设计洞察，包括 patch 大小、解码器设计、像素空间 vs VAE 空间训练动态、模型规模扩展、计算扩展等，具有方法论价值。
+
+#### 14.6.4 PixelUMM 参数量与激活参数
+
+由于 MoT 架构的特性，PixelUMM 的总参数和激活参数有显著区别：
+
+| 维度 | 参数量 | 说明 |
+|------|--------|------|
+| **激活参数/token** | ~8B | 每个 token 只经过一个专家（理解或生成）的 QKV/FFN/Norm |
+| **总参数量** | ~16B | 两个专家的参数总和（理解专家 ~8B + 生成专家 ~8B） |
+
+**依据**：BAGEL 论文（PixelUMM 直接继承的架构）明确表述 "7B active parameters (14B total)"，并指出 "Although the MoE and MoT architectures increase the total parameter count by approximately twofold compared to the dense baseline, all three model variants have identical FLOPs during both training and inference." BAGEL 使用 Qwen2.5-7B 骨干 → 7B 激活 / 14B 总。PixelUMM 使用 Qwen3-8B 骨干 → ~8B 激活 / ~16B 总。
+
+**MoT 硬路由机制使得激活 ≠ 总参数**：
+
+```
+文本 token + 干净视觉 token → 理解专家的 QKV/FFN/Norm（~8B 参数）
+噪声视觉 token           → 生成专家的 QKV/FFN/Norm（~8B 参数）
+
+每个 token 只激活一个专家 → 激活参数 ~8B
+两个专家的参数都需存储   → 总参数 ~16B
+FLOPs 与 8B dense 模型相同（因为每 token 只过一套参数）
+```
+
+论文 F5 实验比较了 "1.7B (F5-R01) 和 8B (F5-R02)"，这里的 1.7B 和 8B 指的是**激活参数量**（即基础模型规模），总参数量分别约为 3.4B 和 16B。
+
+> **出处**：arXiv:2609.38597 — Section 1, 2.1, 3.1.5 (F5)；arXiv:2505.14683 (BAGEL) — "7B active parameters (14B total)"；PixelUMM 源码 `Qwen3MoTDecoderLayer` 双专家结构
